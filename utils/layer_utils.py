@@ -58,7 +58,7 @@ def _time_distributed_dense(x, w, b=None, dropout=None,
     return x
 
 
-class AttentionLSTM(Recurrent):
+class AttentionLSTM(Layer):
     """Long-Short Term Memory unit - with Attention.
 
     # Arguments

@@ -8,12 +8,14 @@ import glob
 from pathlib import Path
 import random
 import pickle
+from tqdm import tqdm
 
 import yfinance as yf
 
 from scipy.stats import zscore
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.model_selection import train_test_split
+from sklearn.ensemble import IsolationForest
 
 
 
@@ -29,21 +31,23 @@ class DataLoader:
 
         all_files = [x.stem for x in processed_folder.glob('*/')]
         tickers = list(set([i.split('_')[0] for i in all_files]))
-        # tickers = ['DELL', 'TSLA']
+        # tickers = ['TSLA', 'F','AXP', 'BAC']
 
         X = list()
         Y = list()
+        buys, sells, holds = 0, 0, 0
         rsi_diff_buy = {3:list(), 5:list(), 10:list()}
         rsi_diff_sell = {3:list(), 5:list(), 10:list()}
 
         # Concat each yearly df to a big df for each ticker
-        for tick in tickers:
-            print(f'Evaluating {tick} ...')
+        for tick_idx, tick in enumerate(tickers):
+            print(f'Evaluating {tick} ... {tick_idx+1} out of {len(tickers)}')
+
             files = list()
             for i in all_files:
                 if tick == i.split('_')[0]:
                     files.append(i)
-                    
+
             all_df = list()
             for file in files:
                 all_df.append(pd.read_csv(processed_folder / f'{file}.csv', index_col='date'))
@@ -53,11 +57,33 @@ class DataLoader:
             df = df.asfreq(freq='1d', method='ffill')
 
 
-            # remove nan rows
-            df.dropna(axis=0, inplace=True)
+            # BBAND - Bollinger band upper/lower signal - percentage of how close the hlc is to upper/lower bband
+            bband_length = 30
+            bband = df.copy().ta.bbands(length=bband_length)
+            bband['hlc'] = df.copy().ta.hlc3()
+
+            bbu_signal = (bband['hlc']-bband['BBM_'+str(bband_length)+'_2.0'])/(bband['BBU_'+str(bband_length)+'_2.0'] - bband['BBM_'+str(bband_length)+'_2.0'])
+            bbl_signal = (bband['hlc']-bband['BBM_'+str(bband_length)+'_2.0'])/(bband['BBL_'+str(bband_length)+'_2.0'] - bband['BBM_'+str(bband_length)+'_2.0'])
+
+            df['BBU_signal'] = bbu_signal
+            df['BBL_signal'] = bbl_signal
+
+
+            # Spread
+            # df['spread'] = (df.high - df.low).abs()
+            # df.replace(0, 1e-3, inplace=True)
+            # print(df.spread.max(), df.spread.min())
+
+            # df[['close', 'BBU_signal', 'BBL_signal']].plot(subplots=True)
+            # plt.show()
+            # print(df.describe()), quit()
 
             # Append yield curve
             # df = self._gen_yield_curve(df)
+
+            # remove nan rows
+            df.replace([np.inf, -np.inf], np.nan, inplace=True)
+            df.dropna(axis=0, inplace=True)            
 
             # Change targets from [0,1,0] to 1
             new_target = list()
@@ -75,19 +101,23 @@ class DataLoader:
             df.target = new_target
 
 
+
+            # print(df[(df.anomaly==False) & (df.target>0)])
+            # quit()
+
             # Save org df
             df_org = df.copy()
 
-
             # Choose selective columns
-            cols = ['MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9', 'RSI_14', 'target']
+            cols = ['MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9', 'RSI_14','BBU_signal', 'BBL_signal', 'target']
             df = df[cols]
             df.RSI_14 /= 100
-
+            
 
             ## Split the data into buy, sell and hold sequences
             num_steps = 90
-            columns_to_scale = ['MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9']
+            columns_to_scale = ['MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9' ,'BBU_signal', 'BBL_signal']
+
 
             df_hold = df[df.target == 0]
             df_buy = df[df.target == 1]
@@ -96,14 +126,15 @@ class DataLoader:
 
             # Buy seq
             buy_seq = list()
-            for idx in range(len(df_buy)):
+            for idx in tqdm(range(len(df_buy)), desc='Buy sequence'):
                 end_date = df_buy.iloc[idx].name
                 start_date = end_date-pd.Timedelta(days=num_steps-1)
                 df_slice = df.loc[start_date:end_date].copy()
                 if len(df_slice) < num_steps:
                     continue
                 # if df_slice.RSI_14.iloc[-1] > 0.3:
-                #     continue                
+                #     continue             
+                
                 df_slice.drop(['target'], axis=1, inplace=True)
 
                 # Save rsi diff
@@ -116,11 +147,17 @@ class DataLoader:
                 # df_slice.plot(subplots=True)
                 # plt.savefig("latest_fig2.png"), quit()
 
+                # Anomaly detection - if the last timestep is not an anomaly, continue
+                df_slice = self._isoforest(df_slice.copy())
+                if not df_slice.iloc[-1].anomaly:
+                    continue
+
                 # Zscore and scale
                 df_slice[columns_to_scale] = df_slice[columns_to_scale].apply(zscore)
                 scaler = MinMaxScaler()
                 df_slice[columns_to_scale] = scaler.fit_transform(df_slice[columns_to_scale])
-                # print(df_slice)
+
+
                 # df_slice.plot(subplots=True)
                 # plt.savefig("latest_fig.png")
 
@@ -134,7 +171,7 @@ class DataLoader:
 
             # Sell seq
             sell_seq = list()
-            for idx in range(len(df_sell)):
+            for idx in tqdm(range(len(df_sell)), desc='Sell sequence'):
                 end_date = df_sell.iloc[idx].name
                 start_date = end_date-pd.Timedelta(days=num_steps-1)
                 df_slice = df.loc[start_date:end_date].copy()
@@ -145,10 +182,14 @@ class DataLoader:
                 df_slice.drop(['target'], axis=1, inplace=True)
 
 
-
                 # Save rsi diff
                 for rsi_idx in rsi_diff_sell.keys():
                     rsi_diff_sell[int(rsi_idx)].append( (df_slice.RSI_14.iloc[-1] - df_slice.RSI_14.iloc[-int(rsi_idx)-1])/rsi_idx )
+
+                # Anomaly detection - if the last timestep is not an anomaly, continue
+                df_slice = self._isoforest(df_slice.copy())
+                if not df_slice.iloc[-1].anomaly:
+                    continue
 
                 # Zscore and scale
                 df_slice[columns_to_scale] = df_slice[columns_to_scale].apply(zscore)
@@ -158,7 +199,7 @@ class DataLoader:
                 sell_seq.append(df_slice.to_numpy())
             sell_seq = np.array(sell_seq, dtype=object)
 
-
+    
             # Determine the shortest sequence - to get equal amount of sell, buy and hold samples
             shortest_seq = min(len(sell_seq), len(buy_seq))
 
@@ -173,13 +214,19 @@ class DataLoader:
             # Hold seq
             hold_idx = np.random.randint(num_steps+1,len(df_hold), size=shortest_seq)
             hold_seq = list()
-            for idx in hold_idx:
+            for idx in tqdm(hold_idx, desc='Hold sequence'):
                 end_date = df_hold.iloc[idx].name
                 start_date = end_date-pd.Timedelta(days=num_steps-1)
                 df_slice = df.loc[start_date:end_date].copy()
+                
                 if len(df_slice) < num_steps-1:
                     continue
                 df_slice.drop(['target'], axis=1, inplace=True)
+
+                # Anomaly detection - if the last timestep is an anomaly, continue
+                df_slice = self._isoforest(df_slice.copy())
+                # if df_slice.iloc[-1].anomaly:
+                #     continue
 
                 # Zscore and scale
                 df_slice[columns_to_scale] = df_slice[columns_to_scale].apply(zscore)
@@ -188,6 +235,12 @@ class DataLoader:
 
                 hold_seq.append(df_slice.to_numpy())
             hold_seq = np.array(hold_seq, dtype=object)
+
+            # Save counts
+            buys += len(buy_seq)
+            sells += len(sell_seq)
+            holds += len(hold_seq)
+            tot = buys+holds+sells
 
 
             # Append to big X and Y
@@ -203,9 +256,8 @@ class DataLoader:
             print(f'{tick} Done')
             print('X shape:', np.array(X).shape)
             print('Y shape:', np.array(Y).shape)
+            print('Buys/Sells/Holds:', buys/tot, sells/tot, holds/tot)
             print('='*5)
-
-
 
 
         X = np.array(X)
@@ -214,7 +266,6 @@ class DataLoader:
         print('X shape:', X.shape)
         print('Y shape:', Y.shape)
         print('='*5)
-
 
         # Save RSI diff
         rsi_diff_folder = Path.cwd() / 'data' / 'rsi_diff'
@@ -229,6 +280,36 @@ class DataLoader:
         with open(staged_folder / 'staged_y.npy', 'wb') as f:
             np.save(f, Y)
 
+
+    def _isoforest(self, df):
+        # Generate anomalie detection based in isolation forest algo
+        # It will set a target to 0 if there is no anomly detected
+        df_org = df.copy()
+
+        df['RSI_SMA'] = df.RSI_14.rolling(window=7).mean()
+        df['RSI_SMA_diff'] = (df.RSI_14 - df.RSI_SMA)
+        df.dropna(inplace=True)
+
+        cols = ['RSI_14', 'RSI_SMA_diff']
+        df = df[cols]
+        
+        clf = IsolationForest(contamination=0.1, bootstrap=False, max_samples=0.99, n_estimators=200).fit(df)
+        predictions = clf.predict(df) == -1
+
+        df.insert(0, 'anomaly', predictions)
+        df_org = df_org.join(df.anomaly)
+        df_org.fillna(False, inplace=True)
+        # print(df_org), quit()
+        
+        # # Change all targets to 0 if no anomaly is detected
+        # df.loc[(df.anomaly==False) & (df.target>0), 'target'] = 0
+        # anomaly_df = df[['anomaly', 'target']]
+
+        # df_org = df_org.join(anomaly_df, lsuffix='old')
+        # df_org.drop(['targetold'], axis=1, inplace=True)
+        # df_org.dropna(axis=0, inplace=True)
+
+        return df_org
 
 
     def _gen_yield_curve(self, df):

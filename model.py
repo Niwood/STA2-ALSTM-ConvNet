@@ -16,6 +16,7 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
+from tensorflow.keras import callbacks
 from tensorflow import Tensor
 from tensorflow.keras.metrics import AUC
 from tensorflow.keras.utils import Sequence
@@ -25,6 +26,7 @@ from tensorflow.keras.layers import Multiply, Masking, Reshape, Permute, Attenti
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import Model, Sequential
 
+from utils.layer_utils import AttentionLSTM
 
 
 
@@ -38,10 +40,10 @@ class Net:
 
         # Parameters
         self.model_name = str(int(time.time()))
-        self.epochs = 100
+        self.epochs = 250
         self.batch_size = 16
         self.metrics = ('Precision', 'Recall', AUC(curve='PR'))
-        self.lr = 1e-4
+        self.lr = 1e-5
 
         # Sequence
         self.load_data()
@@ -75,35 +77,56 @@ class Net:
         print('-'*10)
 
 
+        for i in self.y_test:
+            if sum(i) !=1:
+                print(i)
+                quit()
+
     def compile(self):
         ''' Compile network '''
-        dropout_rate = 0.3
-        num_conv_filters = 8
+        dropout_rate = 0.5
+        num_conv_filters = 16
         # model.add(Attention(name='attention_weight'))
 
         opt = Adam(learning_rate=self.lr)
 
         head = Input(shape=(self.X_train.shape[1],self.X_train.shape[2]))
 
-        layer = Conv1D(filters=num_conv_filters, kernel_size=3, strides=1 , padding='same', activation='relu')(head)
+        x = Masking()(head)
+        # x = LSTM(8, return_sequences=True)(x)
+        # x = LSTM(8, return_sequences=True)(x)
+        x = LSTM(8)(x)
+        # x = AttentionLSTM(8)(x)
+        # x = Attention(name='attention_weight')(x)
+        x = Dropout(dropout_rate)(x)
 
-        num_blocks_list = [2, 5, 5, 5, 2, 2]
-        for i in range(len(num_blocks_list)):
-            num_blocks = num_blocks_list[i]
-            for j in range(num_blocks):
-                layer = self.residual_conv1d_block(layer, downsample=(j==0 and i!=0), filters=num_conv_filters)
-            num_conv_filters *= 2
 
-        layer = GlobalAveragePooling1D()(layer)
+        y = Permute((2, 1))(head)
+        y = Conv1D(num_conv_filters, 4, padding='valid', kernel_initializer='he_uniform')(y)
+        y = BatchNormalization()(y)
+        y = Activation('relu')(y)
+        y = self.squeeze_excite_block(y)
 
-        layer = Dense(32, activation='relu')(layer)
-        layer = Dropout(dropout_rate)(layer)
+        y = Conv1D(2*num_conv_filters, 2, padding='valid', kernel_initializer='he_uniform')(y)
+        y = BatchNormalization()(y)
+        y = Activation('relu')(y)
+        y = self.squeeze_excite_block(y)
 
-        layer = Dense(8, activation='relu')(layer)
-        layer = Dropout(dropout_rate)(layer)
+        y = Conv1D(num_conv_filters, 1, padding='valid', kernel_initializer='he_uniform')(y)
+        y = BatchNormalization()(y)
+        y = Activation('relu')(y)
 
-        tail = Dense(3, activation='softmax')(layer)
+        y = GlobalAveragePooling1D()(y)
 
+        z = Concatenate()([x, y])
+
+        # layer = Dense(8, activation='relu')(layer)
+        # layer = Dropout(dropout_rate)(layer)
+
+        tail = Dense(3, activation='softmax')(z)
+
+
+        self.tensorboard_callback = callbacks.TensorBoard(log_dir="logs/fit/" + self.model_name, histogram_freq=1)
         self.model = Model(inputs=head, outputs=tail)
         self.model.compile(
             loss='categorical_crossentropy',
@@ -141,15 +164,40 @@ class Net:
         return out
 
 
+    def squeeze_excite_block(self, input):
+        ''' Create a squeeze-excite block
+        Args:
+            input: input tensor
+            filters: number of output filters
+            k: width factor
+        Returns: a keras tensor
+        '''
+        filters = input.shape[-1] # channel_axis = -1 for TF
+
+        se = GlobalAveragePooling1D()(input)
+        se = Reshape((1, filters))(se)
+        se = Dense(filters // 16,  activation='relu', kernel_initializer='he_normal', use_bias=False)(se)
+        se = Dense(filters, activation='sigmoid', kernel_initializer='he_normal', use_bias=False)(se)
+        se = Multiply()([input, se])
+        return se
+
+
     def train(self):
         ''' Train '''
+        class_weight = {0: 1.,
+                        1: 10.,
+                        2: 10.}
+
+
         self.model.fit(
             self.X_train,
             self.y_train,
             validation_data=(self.X_test, self.y_test),
             epochs=self.epochs,
             batch_size=self.batch_size,
-            verbose=True
+            verbose=True,
+            callbacks = [self.tensorboard_callback],
+            class_weight=class_weight
             )
 
 

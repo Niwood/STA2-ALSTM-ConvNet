@@ -26,7 +26,7 @@ class StockTradingEnv(gym.Env):
     ACTION_SPACE_SIZE = 3 # Buy, Sell or Hold
 
 
-    def __init__(self, close, num_steps):
+    def __init__(self, df, num_steps):
         super(StockTradingEnv, self).__init__()
 
         # Actions of the format Buy x%, Sell x%, Hold, etc.
@@ -40,14 +40,14 @@ class StockTradingEnv(gym.Env):
         # Data
         self.max_steps = 0
         self.current_step = 0
-        self.close = close
+        self.df = df
         self.num_steps = num_steps
 
 
 
     def _take_action(self, action):
         # Set the current price
-        self.current_price = self.close.iloc[self.current_step]
+        self.current_price = self.df.close[self.current_step]
         # print('current_price: ',self.current_price)
         self.buy_n_hold = (self.current_price / self.initial_price) - 1
 
@@ -101,7 +101,7 @@ class StockTradingEnv(gym.Env):
         self._take_action(action)
 
         # Check if there are no more steps in the data or we have met the maximum amount of steps
-        if self.current_step == self.max_steps or self.current_step == len(self.close):
+        if self.current_step == self.max_steps or self.current_step == len(self.df):
             done = True
         else:
             done = False
@@ -139,12 +139,12 @@ class StockTradingEnv(gym.Env):
         self.amounts = list()
         self.buy_n_hold = 0
         
-
         # Set initial values
-        self.current_step = random.randint(0,len(self.close)-(self.max_steps + self.num_steps))
-        self.initial_price = self.close[self.current_step]
+        self.current_step = self.df.index[0]
+        self.current_price = self.df.close[self.current_step]
+        self.initial_price = self.df.close[self.current_step]
         self.last_buy_price = self.initial_price
-
+        
 
 
 
