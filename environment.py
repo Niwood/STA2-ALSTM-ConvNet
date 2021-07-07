@@ -1,12 +1,9 @@
-import random
-import json
 import gym
 from gym import spaces
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
-import glob
-import pickle
+
 
 from math import copysign
 pd.options.mode.chained_assignment = None
@@ -46,10 +43,7 @@ class StockTradingEnv(gym.Env):
 
 
     def _take_action(self, action):
-        # Set the current price
-        self.current_price = self.df.close[self.current_step]
-        # print('current_price: ',self.current_price)
-        self.buy_n_hold = (self.current_price / self.initial_price) - 1
+
 
         comission = 0.0 # The comission is applied to both buy and sell
         amount = 1
@@ -96,6 +90,16 @@ class StockTradingEnv(gym.Env):
 
 
     def step(self, action):
+
+        # Set the current price
+        self.current_price = self.df.close[self.current_step]
+        # if action == 1:
+        #     print('---> FROM ENV: ')
+        #     print(self.df.close[self.current_step-1])
+        #     print(self.df.close[self.current_step])
+        #     print(self.df.close[self.current_step+1])
+        #     print('---------------')
+        self.buy_n_hold = (self.current_price / self.initial_price) - 1
 
         # Execute one time step within the environment
         self._take_action(action)

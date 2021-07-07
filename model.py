@@ -40,7 +40,7 @@ class Net:
 
         # Parameters
         self.model_name = str(int(time.time()))
-        self.epochs = 250
+        self.epochs = 350
         self.batch_size = 16
         self.metrics = ('Precision', 'Recall', AUC(curve='PR'))
         self.lr = 1e-5

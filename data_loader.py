@@ -149,7 +149,7 @@ class DataLoader:
 
                 # Anomaly detection - if the last timestep is not an anomaly, continue
                 df_slice = self._isoforest(df_slice.copy())
-                if not df_slice.iloc[-1].anomaly:
+                if not df_slice.iloc[-1].peak_anomaly and not df_slice.iloc[-1].valley_anomaly:
                     continue
 
                 # Zscore and scale
@@ -188,7 +188,7 @@ class DataLoader:
 
                 # Anomaly detection - if the last timestep is not an anomaly, continue
                 df_slice = self._isoforest(df_slice.copy())
-                if not df_slice.iloc[-1].anomaly:
+                if not df_slice.iloc[-1].peak_anomaly and not df_slice.iloc[-1].valley_anomaly:
                     continue
 
                 # Zscore and scale
@@ -202,6 +202,8 @@ class DataLoader:
     
             # Determine the shortest sequence - to get equal amount of sell, buy and hold samples
             shortest_seq = min(len(sell_seq), len(buy_seq))
+
+            print('Shortest sequence:', shortest_seq)
 
             # Sample indicies for the shortest sequence
             buy_seq_idx = np.random.choice(range(len(buy_seq)), size=shortest_seq, replace=False)
@@ -296,10 +298,19 @@ class DataLoader:
         clf = IsolationForest(contamination=0.1, bootstrap=False, max_samples=0.99, n_estimators=200).fit(df)
         predictions = clf.predict(df) == -1
 
+
         df.insert(0, 'anomaly', predictions)
         df_org = df_org.join(df.anomaly)
         df_org.fillna(False, inplace=True)
-        # print(df_org), quit()
+
+        
+        df_org.insert(0, 'peak_anomaly', (df_org.anomaly & (df_org.RSI_14.diff() > 0)))
+        df_org.insert(0, 'valley_anomaly', (df_org.anomaly & (df_org.RSI_14.diff() < 0)))
+        df_org.drop(['anomaly'], axis=1, inplace=True)
+        # print(df_org.head(30))
+        # print(df_org.tail(30))
+        # quit()
+        
         
         # # Change all targets to 0 if no anomaly is detected
         # df.loc[(df.anomaly==False) & (df.target>0), 'target'] = 0
