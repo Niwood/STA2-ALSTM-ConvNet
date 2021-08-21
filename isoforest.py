@@ -12,14 +12,14 @@ import glob
 from sklearn.decomposition import PCA
 
 
-raw_folder = Path.cwd() / 'data' / 'raw'
+raw_folder = Path.cwd() / 'data' / 'raw_intraday'
 # tick = 'AAPL'
 # tick2 = 'JPM'
-all_ticks = [x.stem for x in raw_folder.glob('*.csv')]
+all_ticks = [x.stem for x in raw_folder.glob('*.pkl')]
 tick = random.choice(all_ticks)
 
 split = 1000
-df = pd.read_csv(raw_folder / f'{tick}.csv')[0:split]
+df = pd.read_pickle(raw_folder / f'{tick}.pkl')[0:split]
 # df_test = pd.read_csv(raw_folder / f'{tick_test}.csv')
 # df_test = pd.read_csv(raw_folder / f'{tick}.csv')[split::]
 
@@ -91,7 +91,7 @@ def process(df, start, mode):
     # cols = ['close']
     # cols = ['RSI_shift6']
     # cols = ['close_shift2', 'close_shift3', 'close_shift4', 'close_shift5']
-    cols = ['RSI_14', 'RSI_SMA_diff']
+    cols = ['RSI_14', 'RSI_shift3']
     # columns_to_scale = ['MACD_12_26_9', 'MACDs_12_26_9','BBL_signal','BBU_signal']
     # df.RSI_14 /= 100
     df = df[cols].copy()

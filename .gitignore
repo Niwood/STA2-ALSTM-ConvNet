@@ -1,11 +1,18 @@
 models/
 data/
+data/staged/*.npy
+# /logs/*
 logs/
+
 playground/
+tflite_models/
+# data/raw/*
+
 *.pkl
 *.html
 *.pyc
 *.pyo
+# *.npy
 sandbox.py
 latest_fig.png
 latest_fig2.png

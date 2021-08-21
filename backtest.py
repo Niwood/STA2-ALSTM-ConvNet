@@ -7,6 +7,7 @@ from matplotlib.widgets import MultiCursor, RadioButtons, Button
 import matplotlib.dates as mdates
 import numpy as np
 from datetime import datetime, timedelta
+import pytz
 import glob
 from pathlib import Path
 from tqdm import tqdm
@@ -28,7 +29,7 @@ class Backtest:
     def __init__(self):
 
         # Parameters
-        self.model_name = '1624913277'
+        self.model_name = '1626094754'
         self.num_steps = 90
         self.SIM_MAX_STEPS = 500
         self.quantile_thr = 0.01 #for RSI threshold affirmation - lower means tighter
@@ -54,8 +55,12 @@ class Backtest:
         # df = pd.read_csv(self.validation_data_folder / f'{self.tick}.csv')
         
         # df.set_index('Date', inplace=True)
-        df.index = pd.to_datetime(df.index)
-        # print(df), quit()
+        df.index = pd.to_datetime(df.index).tz_convert('UTC')
+        
+        # Hour/minute of day
+        df.insert(1, "hour", df.index.hour, True)
+        df.insert(1, "minute", df.index.minute, True)
+
 
         # TI
 
@@ -86,14 +91,18 @@ class Backtest:
         # Drop na
         df.dropna(inplace=True)
 
+
         # Reset and save index
         date_index = df.index.copy()
         close = df.close.copy()
         df = df.reset_index(drop=False)
 
+
         # Choose selective columns
 
         df.RSI_14 /= 100
+        df.hour /= 24
+        df.minute /= 60
 
         self.df = df
         
@@ -248,7 +257,7 @@ class Backtest:
             df_slice = self._isoforest(df_slice.copy())
 
             # Choose selective columns
-            cols = ['MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9', 'RSI_14','BBU_signal', 'BBL_signal', 'peak_anomaly', 'valley_anomaly']
+            cols = ['MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9', 'RSI_14','BBU_signal', 'BBL_signal', 'peak_anomaly', 'valley_anomaly', 'hour', 'minute',]
             df_slice = df_slice[cols]
 
             # Zscore and scale
@@ -267,19 +276,22 @@ class Backtest:
             # Network predict
 
             # action = random.choice([0,1,2])
-            if df_slice.peak_anomaly.iloc[-1] or df_slice.valley_anomaly.iloc[-1]:
-                prediction = self.model.predict(X)[0]
-                action = np.argmax(prediction)
-                trigger.set(f'Model predicts: {action}', action, override=False)
-            else:
-                action = 0
-                trigger.set(f'Model predicts: {action}', action, override=False)
+            # if df_slice.peak_anomaly.iloc[-1] or df_slice.valley_anomaly.iloc[-1]:
+            #     prediction = self.model.predict(X)[0]
+            #     action = np.argmax(prediction)
+            #     trigger.set(f'Model predicts: {action}', action, override=False)
+            # else:
+            #     action = 0
+            #     trigger.set(f'Model predicts: {action}', action, override=False)
 
+            prediction = self.model.predict(X)[0]
+            action = np.argmax(prediction)
+            trigger.set(f'Model predicts: {action}', action, override=False)
 
             # Model certainty threshold
-            # if trigger.action in (1,2):
-            #     if max(prediction) < 0.80:
-            #         trigger.set(f'Below model certainty threshold ({str(round(max(prediction),2))}): {action} -> 0', 0)
+            if trigger.action in (1,2):
+                if max(prediction) < 0.80:
+                    trigger.set(f'Below model certainty threshold ({str(round(max(prediction),2))}): {action} -> 0', 0)
 
             # RSI threshold affirmation - if predicted hold
             # if trigger.action == 0:

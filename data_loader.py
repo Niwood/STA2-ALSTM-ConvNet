@@ -22,70 +22,90 @@ from sklearn.ensemble import IsolationForest
 class DataLoader:
 
     def __init__(self):
+
+        # Folders
+        self.processed_folder = Path.cwd() / 'data' / 'processed'
+        self.staged_folder = Path.cwd() / 'data' / 'staged'
+
+        # Get all ticks
+        self.tickers = [x.stem for x in self.processed_folder.glob('*/')]
+        random.shuffle(self.tickers)
+        # self.tickers = ['ANAT']
+
+        # Time steps to be fed into the network
+        self.num_steps = 90
+
+        # Columns that need z-score scaling
+        self.columns_to_scale = [
+            'MACD_12_26_9',
+            'MACDh_12_26_9',
+            'MACDs_12_26_9',
+            'BBU_signal',
+            'BBL_signal',
+            'high',
+            'low',
+            'close',
+            'oil',
+            'gold',
+            'eurusd',
+            'dji',
+            'snp',
+            'nasdaq'
+            ]
+
+        # Run
         self.run()
 
+
+
     def run(self):
-        # Load files
-        processed_folder = Path.cwd() / 'data' / 'processed'
-        staged_folder = Path.cwd() / 'data' / 'staged'
 
-        all_files = [x.stem for x in processed_folder.glob('*/')]
-        tickers = list(set([i.split('_')[0] for i in all_files]))
-        # tickers = ['TSLA', 'F','AXP', 'BAC']
-
+        # Init list for X and Y and actions
         X = list()
         Y = list()
         buys, sells, holds = 0, 0, 0
-        rsi_diff_buy = {3:list(), 5:list(), 10:list()}
-        rsi_diff_sell = {3:list(), 5:list(), 10:list()}
+        # rsi_diff_buy = {3:list(), 5:list(), 10:list()}
+        # rsi_diff_sell = {3:list(), 5:list(), 10:list()}
 
         # Concat each yearly df to a big df for each ticker
-        for tick_idx, tick in enumerate(tickers):
-            print(f'Evaluating {tick} ... {tick_idx+1} out of {len(tickers)}')
+        for tick_idx, tick in enumerate(self.tickers):
+            print(f'Evaluating {tick} ... {tick_idx+1} out of {len(self.tickers)}')
 
-            files = list()
-            for i in all_files:
-                if tick == i.split('_')[0]:
-                    files.append(i)
 
-            all_df = list()
-            for file in files:
-                all_df.append(pd.read_csv(processed_folder / f'{file}.csv', index_col='date'))
-            
-            df = pd.concat(all_df)
+            # Read the tick csv
+            df = pd.read_csv(self.processed_folder / f'{tick}.csv', index_col='date')
             df.index = pd.to_datetime(df.index, format='%Y-%m-%d')
-            df = df.asfreq(freq='1d', method='ffill')
 
 
-            # BBAND - Bollinger band upper/lower signal - percentage of how close the hlc is to upper/lower bband
-            bband_length = 30
-            bband = df.copy().ta.bbands(length=bband_length)
-            bband['hlc'] = df.copy().ta.hlc3()
-
-            bbu_signal = (bband['hlc']-bband['BBM_'+str(bband_length)+'_2.0'])/(bband['BBU_'+str(bband_length)+'_2.0'] - bband['BBM_'+str(bband_length)+'_2.0'])
-            bbl_signal = (bband['hlc']-bband['BBM_'+str(bband_length)+'_2.0'])/(bband['BBL_'+str(bband_length)+'_2.0'] - bband['BBM_'+str(bband_length)+'_2.0'])
-
-            df['BBU_signal'] = bbu_signal
-            df['BBL_signal'] = bbl_signal
+            # Drop some columns that are not needed
+            df.drop(['Dividends', 'Stock Splits', 'volume', 'open'], axis=1, inplace=True)
 
 
-            # Spread
-            # df['spread'] = (df.high - df.low).abs()
-            # df.replace(0, 1e-3, inplace=True)
-            # print(df.spread.max(), df.spread.min())
+            # Yield curve
+            df = self._gen_yield_curve(df)
 
-            # df[['close', 'BBU_signal', 'BBL_signal']].plot(subplots=True)
-            # plt.show()
-            # print(df.describe()), quit()
+            # Commodities
+            df = self._gen_oil(df)
+            df = self._gen_gold(df)
 
-            # Append yield curve
-            # df = self._gen_yield_curve(df)
+            # Forex
+            df = self._gen_eurusd(df)
 
-            # remove nan rows
+            # Market indicies
+            df = self._gen_dji(df)
+            df = self._gen_snp(df)
+            df = self._gen_nasdaq(df)
+
+
+            # Remove nan and inf rows - MUST be after adding external features
             df.replace([np.inf, -np.inf], np.nan, inplace=True)
-            df.dropna(axis=0, inplace=True)            
+            df.dropna(axis=0, inplace=True)
 
-            # Change targets from [0,1,0] to 1
+            print(df)
+            print(df.info())
+            quit()
+
+            # Change targets from [0,1,0] to 1, etc.
             new_target = list()
             for tar in df.target:
                 tar = tar[1:-1]
@@ -101,22 +121,13 @@ class DataLoader:
             df.target = new_target
 
 
-
-            # print(df[(df.anomaly==False) & (df.target>0)])
-            # quit()
-
-            # Save org df
-            df_org = df.copy()
-
-            # Choose selective columns
-            cols = ['MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9', 'RSI_14','BBU_signal', 'BBL_signal', 'target']
-            df = df[cols]
+            # Scale RSI
             df.RSI_14 /= 100
             
 
-            ## Split the data into buy, sell and hold sequences
-            num_steps = 90
-            columns_to_scale = ['MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9' ,'BBU_signal', 'BBL_signal']
+            ''' Split the data into buy, sell and hold sequences '''
+            # Define which columns need to be scaled
+
 
 
             df_hold = df[df.target == 0]
@@ -127,74 +138,65 @@ class DataLoader:
             # Buy seq
             buy_seq = list()
             for idx in tqdm(range(len(df_buy)), desc='Buy sequence'):
-                end_date = df_buy.iloc[idx].name
-                start_date = end_date-pd.Timedelta(days=num_steps-1)
-                df_slice = df.loc[start_date:end_date].copy()
-                if len(df_slice) < num_steps:
+
+                end_index = df.index.get_loc(df_buy.iloc[idx].name)
+
+                # Continue if end_index is smaller then the time step
+                if end_index < self.num_steps:
                     continue
-                # if df_slice.RSI_14.iloc[-1] > 0.3:
-                #     continue             
+
+                start_index = end_index - self.num_steps
+                df_slice = df.iloc[start_index:end_index].copy()
+                
+
+                if len(df_slice) < self.num_steps:
+                    continue 
                 
                 df_slice.drop(['target'], axis=1, inplace=True)
 
-                # Save rsi diff
-                for rsi_idx in rsi_diff_buy.keys():
-                    rsi_diff_buy[int(rsi_idx)].append( (df_slice.RSI_14.iloc[-1] - df_slice.RSI_14.iloc[-int(rsi_idx)-1])/rsi_idx )
-
-
-                # print(df_slice)
-                # print(rsi_diff_buy)
-                # df_slice.plot(subplots=True)
-                # plt.savefig("latest_fig2.png"), quit()
-
-                # Anomaly detection - if the last timestep is not an anomaly, continue
-                df_slice = self._isoforest(df_slice.copy())
-                if not df_slice.iloc[-1].peak_anomaly and not df_slice.iloc[-1].valley_anomaly:
-                    continue
-
                 # Zscore and scale
-                df_slice[columns_to_scale] = df_slice[columns_to_scale].apply(zscore)
+                df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
                 scaler = MinMaxScaler()
-                df_slice[columns_to_scale] = scaler.fit_transform(df_slice[columns_to_scale])
-
-
-                # df_slice.plot(subplots=True)
-                # plt.savefig("latest_fig.png")
-
-                # random_num = random.randint(0,100)
-                # if random_num>90:
-                #     self._plotter(df_org.loc[start_date:end_date+pd.Timedelta(days=num_steps)])
+                df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
                 
-                buy_seq.append(df_slice.to_numpy())
+                _df_slice = df_slice.copy()
+                buy_seq.append(_df_slice.to_numpy())
             buy_seq = np.array(buy_seq, dtype=object)
 
 
             # Sell seq
             sell_seq = list()
             for idx in tqdm(range(len(df_sell)), desc='Sell sequence'):
-                end_date = df_sell.iloc[idx].name
-                start_date = end_date-pd.Timedelta(days=num_steps-1)
-                df_slice = df.loc[start_date:end_date].copy()
-                if len(df_slice) < num_steps:
+                
+                end_index = df.index.get_loc(df_sell.iloc[idx].name)
+
+                # Continue if end_index is smaller then the time step
+                if end_index < self.num_steps:
                     continue
-                # if df_slice.RSI_14.iloc[-1] < 0.8:
-                #     continue                
+
+                start_index = end_index - self.num_steps
+                df_slice = df.iloc[start_index:end_index].copy()
+
+
+                if len(df_slice) < self.num_steps:
+                    continue          
                 df_slice.drop(['target'], axis=1, inplace=True)
 
 
                 # Save rsi diff
-                for rsi_idx in rsi_diff_sell.keys():
-                    rsi_diff_sell[int(rsi_idx)].append( (df_slice.RSI_14.iloc[-1] - df_slice.RSI_14.iloc[-int(rsi_idx)-1])/rsi_idx )
+                # for rsi_idx in rsi_diff_sell.keys():
+                #     rsi_diff_sell[int(rsi_idx)].append( (df_slice.RSI_14.iloc[-1] - df_slice.RSI_14.iloc[-int(rsi_idx)-1])/rsi_idx )
 
                 # Anomaly detection - if the last timestep is not an anomaly, continue
-                df_slice = self._isoforest(df_slice.copy())
-                if not df_slice.iloc[-1].peak_anomaly and not df_slice.iloc[-1].valley_anomaly:
-                    continue
+                # df_slice = self._isoforest(df_slice.copy())
+                # if not df_slice.iloc[-1].peak_anomaly and not df_slice.iloc[-1].valley_anomaly:
+                #     pass
+                    # continue
 
                 # Zscore and scale
-                df_slice[columns_to_scale] = df_slice[columns_to_scale].apply(zscore)
+                df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
                 scaler = MinMaxScaler()
-                df_slice[columns_to_scale] = scaler.fit_transform(df_slice[columns_to_scale])
+                df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
 
                 sell_seq.append(df_slice.to_numpy())
             sell_seq = np.array(sell_seq, dtype=object)
@@ -202,6 +204,8 @@ class DataLoader:
     
             # Determine the shortest sequence - to get equal amount of sell, buy and hold samples
             shortest_seq = min(len(sell_seq), len(buy_seq))
+            if shortest_seq == 0:
+                continue
 
             print('Shortest sequence:', shortest_seq)
 
@@ -214,26 +218,33 @@ class DataLoader:
             sell_seq = sell_seq[sell_seq_idx]
 
             # Hold seq
-            hold_idx = np.random.randint(num_steps+1,len(df_hold), size=shortest_seq)
+            hold_idx = np.random.randint(self.num_steps+1,len(df_hold), size=shortest_seq)
             hold_seq = list()
             for idx in tqdm(hold_idx, desc='Hold sequence'):
-                end_date = df_hold.iloc[idx].name
-                start_date = end_date-pd.Timedelta(days=num_steps-1)
-                df_slice = df.loc[start_date:end_date].copy()
                 
-                if len(df_slice) < num_steps-1:
+                end_index = df.index.get_loc(df_hold.iloc[idx].name)
+
+                # Continue if end_index is smaller then the time step
+                if end_index < self.num_steps:
+                    continue
+
+                start_index = end_index - self.num_steps
+                df_slice = df.iloc[start_index:end_index].copy()
+
+                
+                if len(df_slice) < self.num_steps-1:
                     continue
                 df_slice.drop(['target'], axis=1, inplace=True)
 
                 # Anomaly detection - if the last timestep is an anomaly, continue
-                df_slice = self._isoforest(df_slice.copy())
+                # df_slice = self._isoforest(df_slice.copy())
                 # if df_slice.iloc[-1].anomaly:
                 #     continue
 
                 # Zscore and scale
-                df_slice[columns_to_scale] = df_slice[columns_to_scale].apply(zscore)
+                df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
                 scaler = MinMaxScaler()
-                df_slice[columns_to_scale] = scaler.fit_transform(df_slice[columns_to_scale])
+                df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
 
                 hold_seq.append(df_slice.to_numpy())
             hold_seq = np.array(hold_seq, dtype=object)
@@ -270,16 +281,16 @@ class DataLoader:
         print('='*5)
 
         # Save RSI diff
-        rsi_diff_folder = Path.cwd() / 'data' / 'rsi_diff'
-        with open(rsi_diff_folder / 'rsi_diff_sell.pkl', 'wb') as handle:
-            pickle.dump(rsi_diff_sell, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open(rsi_diff_folder / 'rsi_diff_buy.pkl', 'wb') as handle:
-            pickle.dump(rsi_diff_buy, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # rsi_diff_folder = Path.cwd() / 'data' / 'rsi_diff'
+        # with open(rsi_diff_folder / 'rsi_diff_sell.pkl', 'wb') as handle:
+        #     pickle.dump(rsi_diff_sell, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # with open(rsi_diff_folder / 'rsi_diff_buy.pkl', 'wb') as handle:
+        #     pickle.dump(rsi_diff_buy, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         # Save staged data
-        with open(staged_folder / 'staged_x.npy', 'wb') as f:
+        with open(self.staged_folder / 'staged_x.npy', 'wb') as f:
             np.save(f, X)
-        with open(staged_folder / 'staged_y.npy', 'wb') as f:
+        with open(self.staged_folder / 'staged_y.npy', 'wb') as f:
             np.save(f, Y)
 
 
@@ -340,11 +351,17 @@ class DataLoader:
         treas_bill_10y = treas_bill_10y_ticker.history(start=str(start), end=str(end), interval='1d').Close
         treas_bill_30y = treas_bill_30y_ticker.history(start=str(start), end=str(end), interval='1d').Close
 
-        # Create a df to merge and fil for missing dates
-        df_yield = pd.DataFrame(
-            data={'13w':treas_bill_short.to_list(), '5y':treas_bill_5y.to_list() ,'10y':treas_bill_10y.to_list() , '30y':treas_bill_30y.to_list()},
-            index=treas_bill_short.index
-        )
+        # Change series name
+        treas_bill_short.rename("13w", inplace=True)
+        treas_bill_5y.rename("5y", inplace=True)
+        treas_bill_10y.rename("10y", inplace=True)
+        treas_bill_30y.rename("30y", inplace=True)
+
+        # Create a df to merge and fill for missing dates
+        df_yield = pd.concat([treas_bill_short, treas_bill_5y, treas_bill_10y, treas_bill_30y], axis=1)
+        df_yield = df_yield.fillna(method="ffill")
+        
+        # Make sure we have for all dates
         df_yield = df_yield.asfreq(freq='1d', method='ffill')
 
         # Calculate the yield curve
@@ -355,8 +372,141 @@ class DataLoader:
             yield_curve.append(k)
         df_yield['yield_curve'] = yield_curve
 
+        # Check large/small values
+        if max(df_yield.yield_curve.to_list()) > 1 or min(df_yield.yield_curve.to_list()) < -1:
+            print(f'ERROR: Yield curve produced large/small values (max:{max(df_yield.yield_curve.to_list())} min:{min(df_yield.yield_curve.to_list())}). You have to scale them.')
+            quit()
+
+        # Join yield curve with df and return
         df = df.join(df_yield.yield_curve)
         return df
+
+
+    def _gen_gold(self, df):
+        # Get history
+        start = df.index[0].date()
+        end = df.index[-1].date() + pd.Timedelta(days=1)
+
+        # Get the ticker
+        gold_tick = yf.Ticker("GC=F")
+        gold = gold_tick.history(start=str(start), end=str(end), interval='1d').Close
+
+        # Change series name
+        gold.rename("gold", inplace=True)
+
+        # Join with df
+        df = df.join(gold)
+
+        # Fill na
+        df = df.fillna(method="ffill")
+
+        return df
+
+
+    def _gen_oil(self, df):
+        # Get history
+        start = df.index[0].date()
+        end = df.index[-1].date() + pd.Timedelta(days=1)
+
+        # Get the ticker
+        oil_tick = yf.Ticker("CL=F")
+        oil = oil_tick.history(start=str(start), end=str(end), interval='1d').Close
+
+        # Change series name
+        oil.rename("oil", inplace=True)
+
+        # Join with df
+        df = df.join(oil)
+
+        # Fill na
+        df = df.fillna(method="ffill")
+
+        return df
+
+
+    def _gen_eurusd(self, df):
+        # Get history
+        start = df.index[0].date()
+        end = df.index[-1].date() + pd.Timedelta(days=1)
+
+        # Get the ticker
+        eurusd_tick = yf.Ticker("EURUSD=X")
+        eurusd = eurusd_tick.history(start=str(start), end=str(end), interval='1d').Close
+
+        # Change series name
+        eurusd.rename("eurusd", inplace=True)
+
+        # Join with df
+        df = df.join(eurusd)
+
+        # Fill na
+        df = df.fillna(method="ffill")
+
+        return df
+
+
+    def _gen_dji(self, df):
+        # Get history
+        start = df.index[0].date()
+        end = df.index[-1].date() + pd.Timedelta(days=1)
+
+        # Get the ticker
+        dji_tick = yf.Ticker("^DJI")
+        dji = dji_tick.history(start=str(start), end=str(end), interval='1d').Close
+
+        # Change series name
+        dji.rename("dji", inplace=True)
+
+        # Join with df
+        df = df.join(dji)
+
+        # Fill na
+        df = df.fillna(method="ffill")
+
+        return df
+
+
+    def _gen_snp(self, df):
+        # Get history
+        start = df.index[0].date()
+        end = df.index[-1].date() + pd.Timedelta(days=1)
+
+        # Get the ticker
+        snp_tick = yf.Ticker("^GSPC")
+        snp = snp_tick.history(start=str(start), end=str(end), interval='1d').Close
+
+        # Change series name
+        snp.rename("snp", inplace=True)
+
+        # Join with df
+        df = df.join(snp)
+
+        # Fill na
+        df = df.fillna(method="ffill")
+
+        return df
+
+
+    def _gen_nasdaq(self, df):
+        # Get history
+        start = df.index[0].date()
+        end = df.index[-1].date() + pd.Timedelta(days=1)
+
+        # Get the ticker
+        nasdaq_tick = yf.Ticker("^IXIC")
+        nasdaq = nasdaq_tick.history(start=str(start), end=str(end), interval='1d').Close
+
+        # Change series name
+        nasdaq.rename("nasdaq", inplace=True)
+
+        # Join with df
+        df = df.join(nasdaq)
+
+        # Fill na
+        df = df.fillna(method="ffill")
+
+        return df
+
 
     def _plotter(self, df):
         ''' PLOT EX - UNCOMMENT TO SHOW PLOT '''

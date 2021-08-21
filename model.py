@@ -40,8 +40,8 @@ class Net:
 
         # Parameters
         self.model_name = str(int(time.time()))
-        self.epochs = 350
-        self.batch_size = 16
+        self.epochs = 300
+        self.batch_size = 32
         self.metrics = ('Precision', 'Recall', AUC(curve='PR'))
         self.lr = 1e-5
 
@@ -60,6 +60,9 @@ class Net:
             X = np.load(f, allow_pickle=True)
         with open(self.staged_folder / 'staged_y.npy', 'rb') as f:
             Y = np.load(f, allow_pickle=True)
+
+
+
 
         # Split test train
         test_size = 0.2
@@ -81,6 +84,7 @@ class Net:
             if sum(i) !=1:
                 print(i)
                 quit()
+
 
     def compile(self):
         ''' Compile network '''
