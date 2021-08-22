@@ -17,6 +17,8 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import IsolationForest
 
+from scaler import FractionalDifferencing
+from external_features import ExternalFeatures
 
 
 class DataLoader:
@@ -26,32 +28,39 @@ class DataLoader:
         # Folders
         self.processed_folder = Path.cwd() / 'data' / 'processed'
         self.staged_folder = Path.cwd() / 'data' / 'staged'
+        self.external_features_folder = Path.cwd() / 'data' / 'external_features'
 
         # Get all ticks
         self.tickers = [x.stem for x in self.processed_folder.glob('*/')]
         random.shuffle(self.tickers)
-        # self.tickers = ['ANAT']
+        # self.tickers = ['NLS'] #fast
+        # self.tickers = ['NXJ'] #slow
+        # self.tickers = self.tickers[0:100]
 
         # Time steps to be fed into the network
-        self.num_steps = 90
+        self.num_steps = 30
 
         # Columns that need z-score scaling
         self.columns_to_scale = [
+            'close',
+            'high',
+            'low',
             'MACD_12_26_9',
             'MACDh_12_26_9',
             'MACDs_12_26_9',
             'BBU_signal',
             'BBL_signal',
-            'high',
-            'low',
-            'close',
-            'oil',
-            'gold',
-            'eurusd',
-            'dji',
-            'snp',
-            'nasdaq'
+            'volatility'
             ]
+
+        # External features
+        # extfeat = ExternalFeatures()
+        # extfeat.update()
+        self.df_ext_feat = pd.read_csv(self.external_features_folder / 'external_features.csv', index_col='Date')
+        self.df_ext_feat.index = pd.to_datetime(self.df_ext_feat.index, format='%Y-%m-%d')
+
+        # Track fatal runs
+        self.fatal = list()
 
         # Run
         self.run()
@@ -80,30 +89,85 @@ class DataLoader:
             # Drop some columns that are not needed
             df.drop(['Dividends', 'Stock Splits', 'volume', 'open'], axis=1, inplace=True)
 
+            # Volatility
+            df['volatility'] = df.close.rolling(window=2).std()
 
-            # Yield curve
-            df = self._gen_yield_curve(df)
+            # Return
 
-            # Commodities
-            df = self._gen_oil(df)
-            df = self._gen_gold(df)
+            # # Yield curve
+            # df = self._gen_yield_curve(df)
 
-            # Forex
-            df = self._gen_eurusd(df)
+            # # Commodities
+            # df = self._gen_oil(df)
+            # df = self._gen_gold(df)
 
-            # Market indicies
-            df = self._gen_dji(df)
-            df = self._gen_snp(df)
-            df = self._gen_nasdaq(df)
+            # # Forex
+            # df = self._gen_eurusd(df)
 
+            # # Market indicies
+            # df = self._gen_dji(df)
+            # df = self._gen_snp(df)
+            # df = self._gen_nasdaq(df)
+
+            # Join external features
+            df = df.join(self.df_ext_feat)
 
             # Remove nan and inf rows - MUST be after adding external features
             df.replace([np.inf, -np.inf], np.nan, inplace=True)
             df.dropna(axis=0, inplace=True)
 
-            print(df)
-            print(df.info())
-            quit()
+
+            # Fractional differencing and scaling
+            for col in self.columns_to_scale:
+
+                # Select the column to scale
+                serie_to_scale = df[col]
+
+                # Init fracdiff and start iteration
+                fracdiff = FractionalDifferencing(serie_to_scale, lag_cutoff_perc_thrsh=0.5)
+                converged, result_data, p_value, correlation, lag_cutoff_perc, d_value = fracdiff.iterate(verbose=False)
+
+                # If fractional differencing was not able to converge
+                if not converged:
+                    print('FATAL: Fractional differencing was not able to converge:')
+                    print('column:', col)
+                    print('p_value:', p_value)
+                    print('correlation:', correlation)
+                    print('lag_cutoff_perc:', lag_cutoff_perc)
+                    print('d_value:', d_value)
+                    break
+                else:
+                    # print('SUCCESS: Fractional differencing converged:')
+                    # print('column:', col)
+                    # print('p_value:', p_value)
+                    # print('correlation:', correlation)
+                    # print('lag_cutoff_perc:', lag_cutoff_perc)
+                    # print('d_value:', d_value)
+                    # print('='*10)
+                    pass
+
+                # MinMax scale the data
+                scaled_data = fracdiff.scale_minmax(result_data)
+                
+                # Replace the original column with the scaled
+                df.drop([col], axis=1, inplace=True)
+                df = df.join(scaled_data)
+                df.rename(columns={"scaled_data": col}, inplace=True)
+
+
+            # Check if Fractional differencing was successfull
+            if not converged:
+                print(f'Skipping {tick} since fractional differencing was not able to converge.')
+                self.fatal.append(tick)
+                print('='*5)
+                continue
+
+            # Remove nan - MUST be after fractional differencing
+            df.dropna(axis=0, inplace=True)
+
+            # Scale RSI
+            df.RSI_14 /= 100
+
 
             # Change targets from [0,1,0] to 1, etc.
             new_target = list()
@@ -121,9 +185,6 @@ class DataLoader:
             df.target = new_target
 
 
-            # Scale RSI
-            df.RSI_14 /= 100
-            
 
             ''' Split the data into buy, sell and hold sequences '''
             # Define which columns need to be scaled
@@ -155,9 +216,9 @@ class DataLoader:
                 df_slice.drop(['target'], axis=1, inplace=True)
 
                 # Zscore and scale
-                df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
-                scaler = MinMaxScaler()
-                df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
+                # df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
+                # scaler = MinMaxScaler()
+                # df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
                 
                 _df_slice = df_slice.copy()
                 buy_seq.append(_df_slice.to_numpy())
@@ -194,9 +255,9 @@ class DataLoader:
                     # continue
 
                 # Zscore and scale
-                df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
-                scaler = MinMaxScaler()
-                df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
+                # df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
+                # scaler = MinMaxScaler()
+                # df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
 
                 sell_seq.append(df_slice.to_numpy())
             sell_seq = np.array(sell_seq, dtype=object)
@@ -242,9 +303,9 @@ class DataLoader:
                 #     continue
 
                 # Zscore and scale
-                df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
-                scaler = MinMaxScaler()
-                df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
+                # df_slice[self.columns_to_scale] = df_slice[self.columns_to_scale].apply(zscore)
+                # scaler = MinMaxScaler()
+                # df_slice[self.columns_to_scale] = scaler.fit_transform(df_slice[self.columns_to_scale])
 
                 hold_seq.append(df_slice.to_numpy())
             hold_seq = np.array(hold_seq, dtype=object)
@@ -292,6 +353,8 @@ class DataLoader:
             np.save(f, X)
         with open(self.staged_folder / 'staged_y.npy', 'wb') as f:
             np.save(f, Y)
+
+        print(f'Fatal runs: {len(self.fatal)} | Successfull runs {len(self.tickers)-len(self.fatal)}')
 
 
     def _isoforest(self, df):

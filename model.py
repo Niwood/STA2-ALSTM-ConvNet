@@ -39,7 +39,7 @@ class Net:
         self.staged_folder = Path.cwd() / 'data' / 'staged'
 
         # Parameters
-        self.model_name = str(int(time.time()))
+        self.model_name = str(int(time.time())) + '_4lstm_' + '_64conv_'
         self.epochs = 300
         self.batch_size = 32
         self.metrics = ('Precision', 'Recall', AUC(curve='PR'))
@@ -66,7 +66,7 @@ class Net:
 
         # Split test train
         test_size = 0.2
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, Y, test_size=test_size)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, Y, test_size=test_size, shuffle=True)
         
         # Edit format to float32
         self.X_train = np.asarray(self.X_train).astype('float32')
@@ -89,7 +89,8 @@ class Net:
     def compile(self):
         ''' Compile network '''
         dropout_rate = 0.5
-        num_conv_filters = 16
+        num_conv_filters = 64
+        lstm_units = 4
         # model.add(Attention(name='attention_weight'))
 
         opt = Adam(learning_rate=self.lr)
@@ -97,26 +98,26 @@ class Net:
         head = Input(shape=(self.X_train.shape[1],self.X_train.shape[2]))
 
         x = Masking()(head)
-        # x = LSTM(8, return_sequences=True)(x)
-        # x = LSTM(8, return_sequences=True)(x)
-        x = LSTM(8)(x)
+        x = LSTM(lstm_units, return_sequences=True)(x)
+        x = LSTM(lstm_units, return_sequences=True)(x)
+        x = LSTM(lstm_units)(x)
         # x = AttentionLSTM(8)(x)
         # x = Attention(name='attention_weight')(x)
         x = Dropout(dropout_rate)(x)
 
 
         y = Permute((2, 1))(head)
-        y = Conv1D(num_conv_filters, 4, padding='valid', kernel_initializer='he_uniform')(y)
+        y = Conv1D(num_conv_filters, 8, padding='valid', kernel_initializer='he_uniform')(y)
         y = BatchNormalization()(y)
         y = Activation('relu')(y)
         y = self.squeeze_excite_block(y)
 
-        y = Conv1D(2*num_conv_filters, 2, padding='valid', kernel_initializer='he_uniform')(y)
+        y = Conv1D(2*num_conv_filters, 4, padding='valid', kernel_initializer='he_uniform')(y)
         y = BatchNormalization()(y)
         y = Activation('relu')(y)
         y = self.squeeze_excite_block(y)
 
-        y = Conv1D(num_conv_filters, 1, padding='valid', kernel_initializer='he_uniform')(y)
+        y = Conv1D(num_conv_filters, 2, padding='valid', kernel_initializer='he_uniform')(y)
         y = BatchNormalization()(y)
         y = Activation('relu')(y)
 
@@ -124,10 +125,10 @@ class Net:
 
         z = Concatenate()([x, y])
 
-        # layer = Dense(8, activation='relu')(layer)
-        # layer = Dropout(dropout_rate)(layer)
+        layer = Dense(8, activation='relu')(z)
+        layer = Dropout(dropout_rate)(layer)
 
-        tail = Dense(3, activation='softmax')(z)
+        tail = Dense(3, activation='softmax')(layer)
 
 
         self.tensorboard_callback = callbacks.TensorBoard(log_dir="logs/fit/" + self.model_name, histogram_freq=1)
@@ -188,9 +189,9 @@ class Net:
 
     def train(self):
         ''' Train '''
-        class_weight = {0: 1.,
-                        1: 10.,
-                        2: 10.}
+        # class_weight = {0: 1.,
+        #                 1: 1.,
+        #                 2: 1.}
 
 
         self.model.fit(
@@ -200,8 +201,8 @@ class Net:
             epochs=self.epochs,
             batch_size=self.batch_size,
             verbose=True,
-            callbacks = [self.tensorboard_callback],
-            class_weight=class_weight
+            callbacks = [self.tensorboard_callback]
+            # class_weight=class_weight
             )
 
 
