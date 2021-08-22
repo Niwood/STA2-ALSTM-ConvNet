@@ -61,6 +61,7 @@ class DataLoader:
 
         # Track fatal runs
         self.fatal = list()
+        self.successfull_runs = list()
 
         # Run
         self.run()
@@ -327,34 +328,48 @@ class DataLoader:
                 Y.append(np.array([1,0,0]))
 
 
+            self.successfull_runs.append(tick)
             print(f'{tick} Done')
             print('X shape:', np.array(X).shape)
             print('Y shape:', np.array(Y).shape)
             print('Buys/Sells/Holds:', buys/tot, sells/tot, holds/tot)
+            print(f'Fatal runs: {len(self.fatal)} | Successfull runs {len(self.successfull_runs)}')
             print('='*5)
 
+            # Save partial step
+            partial_saves = [100 ,500, 1000, 2000]
+            if tick_idx in partial_saves:
+                self.save(X, Y, tick_idx)
 
-        X = np.array(X)
-        Y = np.array(Y)
+
         print('All tickers preprocessed.')
         print('X shape:', X.shape)
         print('Y shape:', Y.shape)
         print('='*5)
 
-        # Save RSI diff
-        # rsi_diff_folder = Path.cwd() / 'data' / 'rsi_diff'
-        # with open(rsi_diff_folder / 'rsi_diff_sell.pkl', 'wb') as handle:
-        #     pickle.dump(rsi_diff_sell, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        # with open(rsi_diff_folder / 'rsi_diff_buy.pkl', 'wb') as handle:
-        #     pickle.dump(rsi_diff_buy, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # Save
+        self.save(X,Y,'max')
+
+        # # Save staged data
+        # with open(self.staged_folder / 'staged_x.npy', 'wb') as f:
+        #     np.save(f, X)
+        # with open(self.staged_folder / 'staged_y.npy', 'wb') as f:
+        #     np.save(f, Y)
+        # print(f'Fatal runs: {len(self.fatal)} | Successfull runs {len(self.tickers)-len(self.fatal)}')
+
+
+
+
+    def save(self, X, Y, name):
+        X = np.array(X)
+        Y = np.array(Y)
 
         # Save staged data
-        with open(self.staged_folder / 'staged_x.npy', 'wb') as f:
+        with open(self.staged_folder / f'staged_x_{name}.npy', 'wb') as f:
             np.save(f, X)
-        with open(self.staged_folder / 'staged_y.npy', 'wb') as f:
+        with open(self.staged_folder / f'staged_y_{name}.npy', 'wb') as f:
             np.save(f, Y)
 
-        print(f'Fatal runs: {len(self.fatal)} | Successfull runs {len(self.tickers)-len(self.fatal)}')
 
 
     def _isoforest(self, df):
