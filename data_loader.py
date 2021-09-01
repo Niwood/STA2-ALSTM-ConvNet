@@ -35,7 +35,7 @@ class DataLoader:
         random.shuffle(self.tickers)
         # self.tickers = ['NLS'] #fast
         # self.tickers = ['NXJ'] #slow
-        # self.tickers = self.tickers[0:100]
+        # self.tickers = self.tickers[0:10]
 
         # Time steps to be fed into the network
         self.num_steps = 30
@@ -337,25 +337,13 @@ class DataLoader:
             print('='*5)
 
             # Save partial step
-            partial_saves = [100 ,500, 1000, 2000]
+            partial_saves = [200 ,500, 1000, 2000]
             if tick_idx in partial_saves:
                 self.save(X, Y, tick_idx)
 
 
-        print('All tickers preprocessed.')
-        print('X shape:', X.shape)
-        print('Y shape:', Y.shape)
-        print('='*5)
-
         # Save
         self.save(X,Y,'max')
-
-        # # Save staged data
-        # with open(self.staged_folder / 'staged_x.npy', 'wb') as f:
-        #     np.save(f, X)
-        # with open(self.staged_folder / 'staged_y.npy', 'wb') as f:
-        #     np.save(f, Y)
-        # print(f'Fatal runs: {len(self.fatal)} | Successfull runs {len(self.tickers)-len(self.fatal)}')
 
 
 
@@ -364,11 +352,17 @@ class DataLoader:
         X = np.array(X)
         Y = np.array(Y)
 
+        print('All tickers preprocessed.')
+        print('X shape:', X.shape)
+        print('Y shape:', Y.shape)
+        print('='*5)
+
         # Save staged data
         with open(self.staged_folder / f'staged_x_{name}.npy', 'wb') as f:
             np.save(f, X)
         with open(self.staged_folder / f'staged_y_{name}.npy', 'wb') as f:
             np.save(f, Y)
+        print(f'SAVED_{name}')
 
 
 
