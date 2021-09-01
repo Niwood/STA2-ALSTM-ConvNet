@@ -6,6 +6,8 @@ import numpy as np
 import yfinance as yf
 
 from pathlib import Path
+import json
+
 
 
 
@@ -14,15 +16,16 @@ class STA2DB:
     def __init__(self):
 
 
-        # DB parameters
-        DB_HOST = '172.16.0.6'
-        DB_NAME = 'sta2db'
-        DB_USER = 'pi'
-        DB_PASSW = '0510'
+        # DB credentials
+        db_credentials = json.load(open('db_credentials.json'))
 
 
         # Establish onnection and cursor
-        self.conn = psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSW)
+        self.conn = psycopg2.connect(
+            host=db_credentials['DB_HOST'],
+            dbname=db_credentials['DB_NAME'],
+            user=db_credentials['DB_USER'],
+            password=db_credentials['DB_PASSW'])
         self.cursor = self.conn.cursor()
 
 
@@ -115,7 +118,7 @@ if __name__ == '__main__':
 
 
     sta2db = STA2DB()
-    sta2db.table_creation()
+    # sta2db.table_creation()
     sta2db.disconnect()
 
     print('=== EOL: db_sandbox.py ===')

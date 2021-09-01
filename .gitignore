@@ -45,7 +45,7 @@ latest_fig2.png
 *.log
 *.sql
 *.sqlite
-
+*.json
 
 # OS generated files #
 ######################
