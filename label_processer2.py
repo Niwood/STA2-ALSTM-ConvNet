@@ -15,6 +15,7 @@ from sklearn.ensemble import IsolationForest
 
 from datetime import datetime
 
+from utils.feature_engineer import FeatureEngineer
 
 
 
@@ -50,7 +51,10 @@ class LP:
         # All remaining ticks that has not been processed and shuffle
         self.all_ticks = list(all_ticks_in_raw.difference(processed_ticks))
         random.Random(self.SHUFFLE_SEED).shuffle(self.all_ticks)
-            
+        
+        # Feature engineer
+        self.feature_engineer = FeatureEngineer()
+
         # Run
         while True:
             done = self.run()
@@ -83,37 +87,19 @@ class LP:
         except:
             return True
         
+        
         # Load data for the tick
         df = pd.read_pickle(self.raw_folder / f'{tick}.pkl')
         df.index = pd.to_datetime(df.index)
 
-        # Add day/month of year to df
-        df.insert(1, "day_of_year", (df.index.day_of_year-1)/366, True)
-        df.insert(1, "month_of_year", (df.index.month-1)/12, True)
 
+        # Feature engineering
         try:
-            # MACD and RSI
-            df.ta.macd(fast=12, slow=26, append=True)
-            df.ta.rsi(append=True)
-            
-            # BBAND - upper/lower signal, percentage of how close the hlc is to upper/lower bband
-            bband_length = 30
-            bband = df.copy().ta.bbands(length=bband_length)
-            bband['hlc'] = df.copy().ta.hlc3()
-
-            bbu_signal = (bband['hlc']-bband['BBM_'+str(bband_length)+'_2.0'])/(bband['BBU_'+str(bband_length)+'_2.0'] - bband['BBM_'+str(bband_length)+'_2.0'])
-            bbl_signal = (bband['hlc']-bband['BBM_'+str(bband_length)+'_2.0'])/(bband['BBL_'+str(bband_length)+'_2.0'] - bband['BBM_'+str(bband_length)+'_2.0'])
-
-            df['BBU_signal'] = bbu_signal
-            df['BBL_signal'] = bbl_signal
-
+            df = self.feature_engineer.first_process(df)
         except Exception as e:
             print(f'TECHINCAL INDICATORS FAILED ON {tick} - {len(self.all_ticks)} remaining ticks')
             self.all_ticks.remove(tick)
             return False
-
-        # Drop NA rows
-        df.dropna(inplace=True)
 
 
         # Skip if the dataframe is shorter than 200

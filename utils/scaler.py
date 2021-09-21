@@ -4,10 +4,10 @@ import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller 
 from pathlib import Path
 import os
+import math
 
 from numpy import log
 from sklearn.preprocessing import MinMaxScaler
-
 
 
 class FractionalDifferencing:
@@ -75,7 +75,7 @@ class FractionalDifferencing:
     def differencing(self, data, lag_cutoff_perc):
 
         # Calc lag cutoff
-        lag_cutoff = int(lag_cutoff_perc * len(data))
+        lag_cutoff = math.ceil(lag_cutoff_perc * len(data))
 
         # Convert the series to a frame
         data_as_frame = data.to_frame()
@@ -148,7 +148,15 @@ class FractionalDifferencing:
         res = 0
         for k in range(lag_cutoff):
             res += weights[k]*series.shift(k).fillna(0)
-        return res[lag_cutoff:] 
+
+        try:
+            return res[lag_cutoff:]
+        except Exception as e:
+            print(series)
+            print(res)
+            print(lag_cutoff)
+            print(e)
+            quit()
 
 
 
@@ -157,7 +165,7 @@ if __name__ == '__main__':
     folder = Path.cwd() / 'data' / 'processed'
     tick = 'AAPL'
     _data = pd.read_csv(folder / f'{tick}.csv', index_col='date')
-    data = _data.close
+    data = _data.open
 
     fracdiff = FractionalDifferencing(data)
     convergence_flag, result_data, p_value, correlation, lag_cutoff_perc, d_value = fracdiff.iterate(verbose=True)
@@ -172,8 +180,8 @@ if __name__ == '__main__':
     print('lag_cutoff_perc:', lag_cutoff_perc)
 
 
-    scaled_data.hist(bins=50)
-    if "SSH_CONNECTION" in os.environ:
-        plt.savefig("latest_fig.png")
-    else:
-        plt.show()
+    # scaled_data.hist(bins=50)
+    # if "SSH_CONNECTION" in os.environ:
+    #     plt.savefig("latest_fig.png")
+    # else:
+    #     plt.show()

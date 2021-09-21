@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 import yfinance as yf
 
-from scaler import FractionalDifferencing
+from utils.scaler import FractionalDifferencing
 
 
 

@@ -10,8 +10,8 @@ import json
 
 
 
-
 class STA2DB:
+
 
     def __init__(self):
 
@@ -25,7 +25,8 @@ class STA2DB:
             host=db_credentials['DB_HOST'],
             dbname=db_credentials['DB_NAME'],
             user=db_credentials['DB_USER'],
-            password=db_credentials['DB_PASSW'])
+            password=db_credentials['DB_PASSW']
+            )
         self.cursor = self.conn.cursor()
 
 
@@ -36,57 +37,42 @@ class STA2DB:
         # self.cursor.execute("DROP TABLE test;")
 
         # Create table
-        table_name = 'details_companies'
+        table_name = 'trigger'
         self.cursor.execute(f'''
         CREATE TABLE {table_name} 
         (
-            id varchar PRIMARY KEY,
-            company_name varchar,
-            sector varchar,
-            country varchar
-        );
-        ''')
-
-        table_name = 'trigger_buy'
-        self.cursor.execute(f'''
-        CREATE TABLE {table_name} 
-        (
-            trigger_id serial PRIMARY KEY,
+            trigger_id numeric PRIMARY KEY,
             tick varchar,
-            price numeric,
-            date date,
-            time time,
+            buy_price numeric,
+            sell_price numeric,
+            buy_date date,
+            buy_time time,
+            sell_date date,
+            sell_time time,
             return numeric,
-            return_perc numeric
+            return_perc numeric,
+            trigger_desc_buy varchar,
+            trigger_desc_sell varchar,
+            model_confidence_buy numeric,
+            model_confidence_sell numeric,
+            debug BOOLEAN NOT NULL
         );
         ''')
 
-        table_name = 'trigger_sell'
-        self.cursor.execute(f'''
-        CREATE TABLE {table_name} 
-        (
-            trigger_id serial PRIMARY KEY,
-            tick varchar,
-            price numeric,
-            date date,
-            time time,
-            return numeric,
-            return_perc numeric
-        );
-        ''')
 
-        table_name = 'daily_tickers'
-        self.cursor.execute(f'''
-        CREATE TABLE {table_name} 
-        (
-            id serial PRIMARY KEY,
-            tick varchar,
-            close_price numeric,
-            open_price numeric,
-            volume integer
+
+        # table_name = 'daily_tickers'
+        # self.cursor.execute(f'''
+        # CREATE TABLE {table_name} 
+        # (
+        #     id serial PRIMARY KEY,
+        #     tick varchar,
+        #     close_price numeric,
+        #     open_price numeric,
+        #     volume integer
             
-        );
-        ''')
+        # );
+        # ''')
 
 
         # self.cursor.execute("INSERT INTO test (num, data) VALUES (%s, %s)", (100, "abc'def"))
@@ -103,8 +89,9 @@ class STA2DB:
             pass
 
 
-if __name__ == '__main__':
 
+
+if __name__ == '__main__':
 
     # msft = yf.Ticker("MSFT")
     # a = msft.info
@@ -115,10 +102,10 @@ if __name__ == '__main__':
     # '''
     # print(a)
     # quit()
-
+    
 
     sta2db = STA2DB()
     # sta2db.table_creation()
     sta2db.disconnect()
 
-    print('=== EOL: db_sandbox.py ===')
+    # print('=== EOL: db_sandbox.py ===')

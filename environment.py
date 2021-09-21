@@ -9,7 +9,7 @@ from math import copysign
 pd.options.mode.chained_assignment = None
 
 
-INITIAL_ACCOUNT_BALANCE = 100_000
+INITIAL_ACCOUNT_BALANCE = 10_000
 
 
 class StockTradingEnv(gym.Env):
@@ -148,8 +148,9 @@ class StockTradingEnv(gym.Env):
         self.current_price = self.df.close[self.current_step]
         self.initial_price = self.df.close[self.current_step]
         self.last_buy_price = self.initial_price
-        
 
+        # close_change = (100 * (1 - self.df.iloc[0].close / self.df.close)).tolist()        
+        # self.df['close_change'] = close_change
 
 
 if __name__ == '__main__':

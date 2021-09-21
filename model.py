@@ -28,10 +28,14 @@ from tensorflow.keras.regularizers import l2
 
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import Model, Sequential
+from tensorflow.python.data.ops.dataset_ops import BatchDataset, TensorDataset
+from tensorflow.python.eager.function import Function
 from tensorflow.python.framework.ops import default_session
+from tensorflow.python.keras.callbacks import TensorBoard
 from tensorflow.python.ops.gen_batch_ops import batch
 
 from utils.layer_utils import AttentionLSTM
+from utils.decorater import timer
 
 import keras_tuner
 from keras_tuner import RandomSearch, BayesianOptimization
@@ -43,61 +47,75 @@ tf.config.experimental.set_memory_growth(device=gpu[0], enable=True)
 
 class Net:
 
-
+    @timer
     def __init__(self):
+
+        # Parameters
+        MODEL_DESC = 'lstmRegul1e-3_DSmax_lstmUnits1024_convFilters1024_lre-7'
+        # MODEL_DESC = 'test'
+        self.MODEL_NAME = str(int(time.time())) + '_' + MODEL_DESC
+        self.EPOCHS = 1000
+        self.BATCH_SIZE = 25
+        self.TEST_SIZE = 0.1
+        self.DATA_SET = 'max'
+
         # Paths
         self.model_folder = Path.cwd() / 'models'
         self.staged_folder = Path.cwd() / 'data' / 'staged'
+        self.checkpoint_filepath = Path.cwd() / 'models' / f'checkpoints' / self.MODEL_NAME
 
-        # Parameters
-        model_desc = 'lstm_reg_1e-1'
-        self.model_name = str(int(time.time())) + '_' + model_desc
-        self.epochs = 200
-        self.batch_size = 32
+        # Metrics
         self.metrics = ('Precision', 'Recall', AUC(curve='PR'))
-        self.lr = 1e-5
-        self.data_version = '1000'
 
+
+    # def make_model(self):
+        
         # Tensorboard
-        self.tensorboard_callback = callbacks.TensorBoard(log_dir="logs/fit/" + self.model_name, histogram_freq=1)
+        self.tensorboard_callback = callbacks.TensorBoard(log_dir="logs/fit/" + self.MODEL_NAME, histogram_freq=1)
+        self.earlystopping_callback = callbacks.EarlyStopping(monitor='val_auc', patience=10, mode='max', min_delta=0.001)
+        self.checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+            filepath=self.checkpoint_filepath / '{epoch:02d}-{val_auc:.3f}',
+            save_weights_only=False,
+            monitor='val_auc',
+            mode='max',
+            save_best_only=True)
 
         # Sequence
         self.load_data()
-        
 
-        tuner = BayesianOptimization(
-            self.compile,
-            objective=keras_tuner.Objective("val_auc", direction="max"),
-            max_trials=20,
-            executions_per_trial=1,
-            overwrite=True,
-            directory="models",
-            project_name="baysianopt",
-        )
+
+        # tuner = BayesianOptimization(
+        #     self.compile,
+        #     objective=keras_tuner.Objective("val_auc", direction="max"),
+        #     max_trials=20,
+        #     executions_per_trial=1,
+        #     overwrite=True,
+        #     directory="models",
+        #     project_name="baysianopt",
+        # )
         # print(tuner.search_space_summary())
         # tuner.search(
-        #     self.X_train,
-        #     self.y_train,
-        #     epochs=self.epochs,
-        #     batch_size=self.batch_size,
+        #     train_dataset,
+        #     epochs=EPOCHS
         #     callbacks=[
         #         callbacks.EarlyStopping(monitor='val_loss', patience=10, mode='min', min_delta=0.001),
-        #         self.tensorboard_callback
+        #         tensorboard_callback
         #         ],
-        #     validation_data=(self.X_test, self.y_test)
+        #     validation_data=test_dataset
         #     )
         # tuner.results_summary()
 
-        self.compile(hp=0)
+        self.compile()
         self.train()
+
         self.eval()
-        # self.save()
+        self.save()
 
 
 
 
 
-    def compile_simple(self, hp):
+    def compile_simple(self, hp=None):
         ''' Compile simple network '''
 
         opt = Adam(learning_rate=1e-5)
@@ -149,18 +167,18 @@ class Net:
         
         tail = Dense(3, activation='softmax')(layer)
 
-        self.model = Model(inputs=head, outputs=tail)
-        self.model.compile(
+        model = Model(inputs=head, outputs=tail)
+        model.compile(
             loss='categorical_crossentropy',
             optimizer=opt,
             metrics=list(self.metrics)
             )
 
         # print(self.model.summary())
-        return self.model
+        return model
 
 
-    def compile(self, hp):
+    def compile(self, hp=None):
         ''' Compile network '''
 
         '''
@@ -186,7 +204,7 @@ class Net:
 
         ''' CONV FILTERS '''
         # conv_filters = hp.Int("conv_filters", min_value=400, max_value=700, step=10)
-        conv_filters = 512
+        conv_filters = 1024
 
         ''' TAIL DENSE LAYER '''
         # tail_dense_units = hp.Int("tail_dense_units", min_value=50, max_value=200, step=10)
@@ -199,19 +217,19 @@ class Net:
         # num_lstm_layers = hp.Int("num_lstm_layers", min_value=0, max_value=10, step=2, default=5)
         # lstm_units = hp.Choice("lstm_units", values=[256, 512, 1024])
         num_lstm_layers = 2
-        lstm_units = 512
+        lstm_units = 1024
         # l2_reg_param_lstm = hp.Choice("l2_reg_param_lstm", values=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5])
-        l2_reg_param_lstm = 1e-1
+        l2_reg_param_lstm = 1e-3 #1e-3 seems to be good
         
 
         ''' LEARNING RATE '''
         # learning_rate = hp.Choice("learning_rate", values=[1e-4, 1e-5, 1e-6])
-        learning_rate = 1e-6
+        LEARNING_RATE = 1e-7
 
 
         # model.add(Attention(name='attention_weight'))
 
-        opt = Adam(learning_rate=learning_rate)
+        opt = Adam(learning_rate=LEARNING_RATE)
 
         head = Input(shape=(self.X_train.shape[1],self.X_train.shape[2]))
 
@@ -265,8 +283,8 @@ class Net:
 
         
         
-        self.model = Model(inputs=head, outputs=tail)
-        self.model.compile(
+        model = Model(inputs=head, outputs=tail)
+        model.compile(
             loss='categorical_crossentropy',
             # loss='binary_crossentropy',
             optimizer=opt,
@@ -274,10 +292,11 @@ class Net:
             )
 
         # print(self.model.summary())
-        return self.model
+        self.model = model
+        return model
 
 
-    def relu_batchnorm(self, inputs: Tensor) -> Tensor:
+    def relu_batchnorm(self, inputs) -> Tensor:
         # Helper function for relu activation and batch norm
         relu = ReLU()(inputs)
         bn = BatchNormalization()(relu)
@@ -327,14 +346,14 @@ class Net:
     def load_data(self):
 
         ''' LOAD DATA '''
-        with open(self.staged_folder / f'staged_x_{self.data_version}.npy', 'rb') as f:
+        with open(self.staged_folder / f'staged_x_{self.DATA_SET}.npy', 'rb') as f:
             X = np.load(f, allow_pickle=True)
-        with open(self.staged_folder / f'staged_y_{self.data_version}.npy', 'rb') as f:
+        with open(self.staged_folder / f'staged_y_{self.DATA_SET}.npy', 'rb') as f:
             Y = np.load(f, allow_pickle=True)
 
+
         # Split test train
-        test_size = 0.2
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, Y, test_size=test_size, shuffle=True)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, Y, test_size=self.TEST_SIZE, shuffle=True)
         
         # Edit format to float32
         self.X_train = np.asarray(self.X_train).astype('float32')
@@ -348,35 +367,37 @@ class Net:
         print('-'*10)
 
 
+        # Convert to tf dataset
+        train_dataset = tf.data.Dataset.from_tensor_slices((self.X_train, self.y_train))
+        test_dataset = tf.data.Dataset.from_tensor_slices((self.X_test, self.y_test))
 
-        for i in self.y_test:
-            if sum(i) !=1:
-                print(i)
-                quit()
+        self.train_dataset = train_dataset.batch(self.BATCH_SIZE)
+        self.test_dataset = test_dataset.batch(self.BATCH_SIZE)
+
+
 
 
     def train(self):
         ''' Train '''
+
         # class_weight = {0: 1.,
         #                 1: 1.,
         #                 2: 1.}
 
-
         self.model.fit(
-            self.X_train,
-            self.y_train,
-            validation_data=(self.X_test, self.y_test),
-            epochs=self.epochs,
-            batch_size=self.batch_size,
+            self.train_dataset,
+            validation_data=self.test_dataset,
+            epochs=self.EPOCHS,
             verbose=True,
-            callbacks = [self.tensorboard_callback]
+            callbacks = [self.tensorboard_callback, self.earlystopping_callback, self.checkpoint_callback]
             # class_weight=class_weight
             )
 
 
+
     def eval(self):
         ''' Evaluate '''
-        eval_metrics = self.model.evaluate(self.X_test, self.y_test, batch_size=self.batch_size)
+        eval_metrics = self.model.evaluate(self.test_dataset, batch_size=self.BATCH_SIZE)
         for val, met in zip(eval_metrics, ('loss', *self.metrics)):
             print(met, val)
         return eval_metrics
@@ -384,10 +405,9 @@ class Net:
 
     def save(self):
         ''' Save model '''
-        self.model.save(self.model_folder / self.model_name)
-        print(f'Model saved as: {self.model_name}')
+        self.model.save(self.model_folder / self.MODEL_NAME)
+        print(f'Model saved as: {self.MODEL_NAME}')
 
 
 if __name__ == '__main__':
     net = Net()
-    print('=== EOL: model.py ===')
