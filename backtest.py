@@ -118,6 +118,7 @@ class Backtest:
     def load_model(self):
         ''' LOAD MODEL '''
         self.model = tf.keras.models.load_model(self.model_path)
+        print(self.model.summary()), quit()
         # self.model = tflite.Interpreter(model_path=str(self.model_path))
 
 
@@ -503,6 +504,7 @@ class Gain:
 if __name__ == '__main__':
 
     back = Backtest()
+    
     back.run()
     back.plotter()
     print('=== EOL: backtest.py ===')
